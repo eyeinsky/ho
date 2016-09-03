@@ -2,7 +2,9 @@ module Main where
 
 import Prelude
 import Data.Monoid
+import Data.String
 import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TLB
 import qualified Data.Text.Lazy.IO as TLIO
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -10,41 +12,46 @@ import qualified Data.Map as M
 import qualified Options.Applicative as O
 import System.Process (readProcess)
 
-import Formatting
+-- import Formatting
+import qualified Data.Text.Format as F
 
 -- * Command line arguments
 
-data Args = Args
+data Config = Config
+  -- histogram
   { buckets :: Integer
-  , precision :: Int
-  , scale :: Maybe Integer
+  , scale :: Either Integer Integer -- Either force $(tput lines)
+  -- labels
+  , showBuckets :: Bool
+  , showCounts :: Bool
   } deriving (Show)
 
-argp :: Args -> O.ParserInfo Args
+argp :: Config -> O.ParserInfo Config
 argp def = O.info (O.helper <*> optParser) optProgDesc
   where
     optProgDesc = O.fullDesc
        <> O.header "ho"
        <> O.progDesc "<description>"
-    optParser = pure Args
+    optParser = pure Config
        <*> optAuto 'b' "buckets" "number of buckets" (O.value (buckets def))
-       <*> optAuto 'p' "precision" "number of significant digits to show in bucket labels" (O.value (precision def))
        <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
+       <*> optAuto 'r' "show-buckets" "show buckets" (O.value (showBuckets def))
+       <*> optAuto 'c' "show-counts" "show counts" (O.value (showCounts def))
 
 main :: IO ()
 main = do
-  def <- getDefaults
-  Args b p s <- O.execParser $ argp def
+  Config b s r c <- getDefaults
   freqs :: Counts Double <- readFreqs . lines <$> getContents
-  TLIO.putStr $ sh p s $ toBuckets b freqs
+  TLIO.putStr $ sh r c s $ toBuckets b freqs
 
-getDefaults :: IO Args
+getDefaults :: IO Config
 getDefaults = do
   cols <- read' "cols"
   lines <- read' "lines"
-  let def = Args (lines - 1) 3 (Just (cols - 30))
-  print def
-  return def
+  let def = Config (lines - 1) (Right cols) False True
+  args <- O.execParser $ argp def
+  print args
+  return args
   where
     read' what = read <$> readProcess "tput" [what] ""
 
@@ -56,7 +63,7 @@ type Buckets a = [((a, a), Integer)]
 readFreqs :: (Read a, Ord a) => [String] -> Counts a
 readFreqs = foldl (\m t -> M.insertWith (+) (read t) 1 m) M.empty
 
-toBuckets :: (Fractional a, Ord a) => Integer -> Counts a -> Buckets a
+toBuckets :: (Fractional a, Ord a, Show a) => Integer -> Counts a -> Buckets a
 toBuckets n rm = f buckets li
   where
     li = M.toAscList rm
@@ -66,23 +73,56 @@ toBuckets n rm = f buckets li
     step = (max - min) / fromIntegral n
     points = iterate (+step) min
     buckets = takeWhile ((<= max) . snd) $ points `zip` tail points
+    -- TODO buckets = let l = snd $ last buckets'
+    --  in buckets' <> [(l, l + step)]
     f (bu@ (_, b) : xs) li = let
         (cur, rest) = L.partition ((<= b) . fst) li
       in (bu, sum (map snd cur)) : f xs rest
     f [] [] = []
-    f a b = [] -- error "error" -- a: " <> show a <> "\nb: " <> show b
+    f a b = [] -- TODO error $ "a: " <> show a <> "\nb: " <> show b
 
 -- * Show
 
-sh :: Real a => Int -> Maybe Integer -> Buckets a -> TL.Text
-sh p ms bm = TL.unlines $ map row bm
+sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets a -> TL.Text
+sh showBuckets showCounts scaleC bm = TL.unlines $ map row bm
   where
-    row ((a, b), c) = format
-      (prec p % " - " % prec p % " " % left 6 ' ' % " | ") a b c
+    sep1 = " - "
+    sep2 = " "
+    sep3 = "  "
+    maxCount = maximum $ map snd bm
+    countLength = length $ show maxCount
+    (amax, bmax) = bucketLabels bm
+    mkFormat n = let p = n + 3 in (F.left p ' ' . F.prec n, p)
+    (aformat, amaxPadded) = mkFormat amax
+    (bformat, bmaxPadded) = mkFormat bmax
+
+    f :: Bool -> TL.Text -> TL.Text
+    f b s = if b then s else ""
+    row ((a, b), c) =
+         f showBuckets (TLB.toLazyText $ aformat a <> sep1 <> bformat b <> sep2)
+      <> f showCounts (TLB.toLazyText $ F.left countLength ' ' c <> sep3)
       <> TL.replicate (fromIntegral (scale c)) "*"
 
-    mc = maximum $ map snd bm
-    scale = maybe id (\scale cur -> floor (fromIntegral (cur * scale) / fromIntegral mc)) ms :: Integer -> Integer
+    scale :: Integer -> Integer
+    scale = case scaleC of
+      Left scaleTo -> let frac = fromInteger scaleTo / fromInteger maxCount
+        in \cur -> floor (frac * fromInteger cur)
+      Right termWidth -> let
+        scaleTo = termWidth
+          - (if showBuckets then toInteger $ (amaxPadded + bmaxPadded) + tlen sep1 + tlen sep2 else 0)
+          - (if showCounts then toInteger (countLength + tlen sep3) else 0)
+        in if maxCount < scaleTo
+          then id
+          else let
+              frac = fromInteger scaleTo / fromInteger maxCount
+            in \cur -> floor (frac * fromInteger cur)
+
+tlen = fromIntegral . TL.length
+
+bucketLabels bm = let
+  (as, bs) = unzip $ map fst bm
+  intSize = length . show . maximum . map ceiling
+  in (intSize as, intSize bs)
 
 -- * Helpers
 
