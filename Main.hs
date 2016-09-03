@@ -6,8 +6,6 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TLIO
 import qualified Data.List as L
 import qualified Data.Map as M
--- import qualified Data.HashMap.Strict as HM
--- import qualified Data.Hashable as H
 
 import qualified Options.Applicative as O
 import System.Process (readProcess)
@@ -51,13 +49,6 @@ getDefaults = do
     read' what = read <$> readProcess "tput" [what] ""
 
 -- * Histogram
-
-{-
-type TokenMap a = HM.HashMap a Int
-
-tokenFreqs :: (H.Hashable a, Eq a) => [a] -> TokenMap a
-tokenFreqs = foldl (\m t -> HM.insertWith (+) t 1 m) HM.empty
--}
 
 type Counts a = M.Map a Integer
 type Buckets a = [((a, a), Integer)]

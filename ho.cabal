@@ -32,8 +32,6 @@ executable ho
   build-depends:
       base >=4.9 && <4.10
     , containers
-    -- , unordered-containers
-    -- , hashable
     , optparse-applicative
     , formatting
     , text
