@@ -37,4 +37,5 @@ executable ho
     , optparse-applicative
     , formatting
     , text
+    , process
   default-language:    Haskell2010

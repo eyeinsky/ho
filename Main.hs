@@ -10,6 +10,7 @@ import qualified Data.Map as M
 -- import qualified Data.Hashable as H
 
 import qualified Options.Applicative as O
+import System.Process (readProcess)
 
 import Formatting
 
@@ -19,24 +20,35 @@ data Args = Args
   { buckets :: Integer
   , precision :: Int
   , scale :: Maybe Integer
-  }
+  } deriving (Show)
 
-argp :: O.ParserInfo Args
-argp = O.info (O.helper <*> optParser) optProgDesc
-
-optProgDesc = O.fullDesc
-   <> O.header "ho"
-   <> O.progDesc "<description>"
-optParser = pure Args
-   <*> optAuto 'b' "buckets" "number of buckets" (O.value 10)
-   <*> optAuto 'p' "precision" "number of significant digits to show in bucket labels" (O.value 4)
-   <*> optAuto 's' "scale" "scale counts to some integer" (O.value Nothing)
+argp :: Args -> O.ParserInfo Args
+argp def = O.info (O.helper <*> optParser) optProgDesc
+  where
+    optProgDesc = O.fullDesc
+       <> O.header "ho"
+       <> O.progDesc "<description>"
+    optParser = pure Args
+       <*> optAuto 'b' "buckets" "number of buckets" (O.value (buckets def))
+       <*> optAuto 'p' "precision" "number of significant digits to show in bucket labels" (O.value (precision def))
+       <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
 
 main :: IO ()
 main = do
-  Args b p s <- O.execParser argp
+  def <- getDefaults
+  Args b p s <- O.execParser $ argp def
   freqs :: Counts Double <- readFreqs . lines <$> getContents
   TLIO.putStr $ sh p s $ toBuckets b freqs
+
+getDefaults :: IO Args
+getDefaults = do
+  cols <- read' "cols"
+  lines <- read' "lines"
+  let def = Args (lines - 1) 3 (Just (cols - 30))
+  print def
+  return def
+  where
+    read' what = read <$> readProcess "tput" [what] ""
 
 -- * Histogram
 
