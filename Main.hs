@@ -26,7 +26,7 @@ data Config = Config
   , scale :: Either Integer Integer -- Either force $(tput lines)
   -- labels
   , showBuckets :: Bool
-  , showCounts :: Bool
+  , hideCounts :: Bool
   } deriving (Show)
 
 argp :: Config -> O.ParserInfo Config
@@ -38,8 +38,8 @@ argp def = O.info (O.helper <*> optParser) optProgDesc
     optParser = pure Config
        <*> optAuto 'b' "buckets" "number of buckets" (O.value (buckets def))
        <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
-       <*> optAuto 'r' "show-buckets" "show buckets" (O.value (showBuckets def))
-       <*> optAuto 'c' "show-counts" "show counts" (O.value (showCounts def))
+       <*> optSw 'r' "show-buckets" "show buckets" mempty
+       <*> optSw 'c' "hide-counts" "hide counts" mempty
 
 main :: IO ()
 main = do
@@ -91,7 +91,7 @@ toBuckets n rm = if toInteger (M.size rm) <= n
 -- * Show
 
 sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets a -> TL.Text
-sh showBuckets showCounts scaleC b = TL.unlines $ case b of
+sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
   Interval bm -> let
       (amax, bmax) = intervalLabels bm
       (aformat, amaxPadded) = mkFormat amax
@@ -121,7 +121,7 @@ sh showBuckets showCounts scaleC b = TL.unlines $ case b of
     row :: forall b. (b -> W ()) -> (Integer -> Integer) -> (b, Integer) -> TL.Text
     row mkLabel scale (bucket, c) = execWriter $ do
       mkLabel bucket
-      when showCounts $ tell (countNum countLength c)
+      when (not hideCounts) $ tell (countNum countLength c)
       tell $ countBar scale c
 
     scale :: Integer -> Integer -> Integer
@@ -129,7 +129,7 @@ sh showBuckets showCounts scaleC b = TL.unlines $ case b of
       Left scaleTo -> let frac = fromInteger scaleTo / fromInteger maxCount
         in \cur -> floor (frac * fromInteger cur)
       Right termWidth -> let
-        deduction = (if showBuckets then bucketLabelLength else 0) + (if showCounts then countLabelLength else 0)
+        deduction = (if showBuckets then bucketLabelLength else 0) + (if not hideCounts then countLabelLength else 0)
         scaleTo = termWidth - deduction
         in if maxCount < scaleTo
           then id
@@ -153,7 +153,7 @@ intSize = length . show . maximum . map ceiling
 
 -- * Helpers
 
--- optSw  = maker O.switch
+optSw  = maker O.switch
 -- optStr = maker O.strOption
 optAuto = maker (O.option O.auto)
 
