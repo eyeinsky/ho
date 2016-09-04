@@ -9,6 +9,9 @@ import qualified Data.Text.Lazy.IO as TLIO
 import qualified Data.List as L
 import qualified Data.Map as M
 
+import Data.Functor.Identity
+import Control.Monad.Writer
+
 import qualified Options.Applicative as O
 import System.Process (readProcess)
 
@@ -58,13 +61,17 @@ getDefaults = do
 -- * Histogram
 
 type Counts a = M.Map a Integer
-type Buckets a = [((a, a), Integer)]
+data Buckets a
+  = Interval [((a, a), Integer)]
+  | Discrete [(a, Integer)]
 
 readFreqs :: (Read a, Ord a) => [String] -> Counts a
 readFreqs = foldl (\m t -> M.insertWith (+) (read t) 1 m) M.empty
 
 toBuckets :: (Fractional a, Ord a, Show a) => Integer -> Counts a -> Buckets a
-toBuckets n rm = f buckets li
+toBuckets n rm = if toInteger (M.size rm) <= n
+  then Discrete li
+  else Interval $ f buckets li
   where
     li = M.toAscList rm
     keys = map fst li
@@ -84,45 +91,65 @@ toBuckets n rm = f buckets li
 -- * Show
 
 sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets a -> TL.Text
-sh showBuckets showCounts scaleC bm = TL.unlines $ map row bm
+sh showBuckets showCounts scaleC b = TL.unlines $ case b of
+  Interval bm -> let
+      (amax, bmax) = intervalLabels bm
+      (aformat, amaxPadded) = mkFormat amax
+      (bformat, bmaxPadded) = mkFormat bmax
+      intervalLabel (a, b) = when showBuckets $ tell (TLB.toLazyText $ aformat a <> sep1 <> bformat b <> sep2)
+      bucketLabelLength = toInteger $ (amaxPadded + bmaxPadded) + tlen sep1 + tlen sep2
+    in map (row intervalLabel (scale bucketLabelLength)) bm
+
+  Discrete bm -> let
+      amax = discreteLabels bm
+      (aformat, amaxPadded) = mkFormat amax
+      discreteLabel a = when showBuckets $ tell (TLB.toLazyText $ aformat a <> sep2)
+      bucketLabelLength = toInteger $ amaxPadded + tlen sep2
+    in map (row discreteLabel (scale bucketLabelLength)) bm
+
   where
     sep1 = " - "
     sep2 = " "
     sep3 = "  "
-    maxCount = maximum $ map snd bm
+    countBar scale c = TL.replicate (fromIntegral (scale c)) "*"
+    countNum n c = TLB.toLazyText $ F.left n ' ' c <> sep3
+
+    maxCount = maximum $ case b of Interval bm -> map snd bm; Discrete bm -> map snd bm
     countLength = length $ show maxCount
-    (amax, bmax) = bucketLabels bm
-    mkFormat n = let p = n + 3 in (F.left p ' ' . F.prec n, p)
-    (aformat, amaxPadded) = mkFormat amax
-    (bformat, bmaxPadded) = mkFormat bmax
+    countLabelLength = toInteger (countLength + tlen sep3)
 
-    f :: Bool -> TL.Text -> TL.Text
-    f b s = if b then s else ""
-    row ((a, b), c) =
-         f showBuckets (TLB.toLazyText $ aformat a <> sep1 <> bformat b <> sep2)
-      <> f showCounts (TLB.toLazyText $ F.left countLength ' ' c <> sep3)
-      <> TL.replicate (fromIntegral (scale c)) "*"
+    row :: forall b. (b -> W ()) -> (Integer -> Integer) -> (b, Integer) -> TL.Text
+    row mkLabel scale (bucket, c) = execWriter $ do
+      mkLabel bucket
+      when showCounts $ tell (countNum countLength c)
+      tell $ countBar scale c
 
-    scale :: Integer -> Integer
-    scale = case scaleC of
+    scale :: Integer -> Integer -> Integer
+    scale bucketLabelLength = case scaleC of
       Left scaleTo -> let frac = fromInteger scaleTo / fromInteger maxCount
         in \cur -> floor (frac * fromInteger cur)
       Right termWidth -> let
-        scaleTo = termWidth
-          - (if showBuckets then toInteger $ (amaxPadded + bmaxPadded) + tlen sep1 + tlen sep2 else 0)
-          - (if showCounts then toInteger (countLength + tlen sep3) else 0)
+        deduction = (if showBuckets then bucketLabelLength else 0) + (if showCounts then countLabelLength else 0)
+        scaleTo = termWidth - deduction
         in if maxCount < scaleTo
           then id
           else let
               frac = fromInteger scaleTo / fromInteger maxCount
             in \cur -> floor (frac * fromInteger cur)
 
+type W = WriterT TL.Text Data.Functor.Identity.Identity
+
 tlen = fromIntegral . TL.length
 
-bucketLabels bm = let
+intervalLabels bm = let
   (as, bs) = unzip $ map fst bm
-  intSize = length . show . maximum . map ceiling
   in (intSize as, intSize bs)
+
+discreteLabels bm = intSize (map fst bm)
+
+mkFormat n = let p = n + 3 in (F.left p ' ' . F.prec n, p)
+
+intSize = length . show . maximum . map ceiling
 
 -- * Helpers
 
