@@ -3,19 +3,22 @@ module Main where
 import Prelude
 import Data.Monoid
 import Data.String
+import Text.Read
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import qualified Data.Text.Lazy.IO as TLIO
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.Scientific as Sc
 
 import Data.Functor.Identity
 import Control.Monad.Writer
+import Control.Monad
+import Control.Arrow (first)
 
 import qualified Options.Applicative as O
 import System.Process (readProcess)
 
--- import Formatting
 import qualified Data.Text.Format as F
 
 -- * Command line arguments
@@ -61,36 +64,41 @@ getDefaults = do
 -- * Histogram
 
 type Counts a = M.Map a Integer
-data Buckets a
-  = Interval [((a, a), Integer)]
-  | Discrete [(a, Integer)]
+data Buckets
+  = Interval [((Rational, Rational), Integer)]
+  | Discrete [(Rational, Integer)]
+  deriving Show
 
 readFreqs :: (Read a, Ord a) => [String] -> Counts a
 readFreqs = foldl (\m t -> M.insertWith (+) (read t) 1 m) M.empty
 
-toBuckets :: (Fractional a, Ord a, Show a) => Integer -> Counts a -> Buckets a
+toBuckets :: (Fractional a, Ord a, Show a, Real a) => Integer -> Counts a -> Buckets
 toBuckets n rm = if toInteger (M.size rm) <= n
   then Discrete li
-  else Interval $ f buckets li
+  else let
+      buckets = mkIntervals n (map fst li)
+    in Interval $ f buckets li
   where
-    li = M.toAscList rm
-    keys = map fst li
-    min = minimum keys
-    max = maximum keys
+    li = map (first toRational) $ M.toAscList rm
+
+mkIntervals n li = let
+    min = toRational $ minimum li
+    max = toRational $ maximum li
     step = (max - min) / fromIntegral n
-    points = iterate (+step) min
-    buckets = takeWhile ((<= max) . snd) $ points `zip` tail points
-    -- TODO buckets = let l = snd $ last buckets'
-    --  in buckets' <> [(l, l + step)]
-    f (bu@ (_, b) : xs) li = let
-        (cur, rest) = L.partition ((<= b) . fst) li
-      in (bu, sum (map snd cur)) : f xs rest
-    f [] [] = []
-    f a b = [] -- TODO error $ "a: " <> show a <> "\nb: " <> show b
+    points = takeWhile (<= max) $ iterate (+step) min
+    intervals = points `zip` tail points
+  in takeWhile ((<= max) . snd) intervals
+
+f :: (Ord a, Num b) => [(a, a)] -> [(a, b)] -> [((a, a), b)]
+f (bu@ (_, b) : xs) li = let
+    (cur, rest) = L.partition ((<= b) . fst) li
+  in (bu, sum (map snd cur)) : f xs rest
+f [] [] = []
+f a b = error "This should never happen"
 
 -- * Show
 
-sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets a -> TL.Text
+sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets -> TL.Text
 sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
   Interval bm -> let
       (amax, bmax) = intervalLabels bm
