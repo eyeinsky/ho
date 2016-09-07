@@ -38,7 +38,7 @@ argp def = O.info (O.helper <*> optParser) optProgDesc
   where
     optProgDesc = O.fullDesc
        <> O.header "ho"
-       <> O.progDesc "<description>"
+       <> O.progDesc "Make simple histograms on the terminal from numeric input"
     optParser = pure Config
        <*> optAuto 'b' "buckets" "number of buckets" (O.value (buckets def))
        <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
