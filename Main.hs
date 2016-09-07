@@ -30,6 +30,7 @@ data Config = Config
   -- labels
   , hideBuckets :: Bool
   , hideCounts :: Bool
+  , input :: String
   } deriving (Show)
 
 argp :: Config -> O.ParserInfo Config
@@ -43,12 +44,16 @@ argp def = O.info (O.helper <*> optParser) optProgDesc
        <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
        <*> optSw 'r' "hide-buckets" "hide buckets" mempty
        <*> optSw 'c' "hide-counts" "hide counts" mempty
+       <*> O.argument O.str (O.metavar "FILE")
 
 main :: IO ()
 main = do
-  Config b s r c <- getDefaults
-  freqs :: Counts Double <- readFreqs . lines <$> getContents
-  TLIO.putStr $ sh r c s $ toBuckets b freqs
+  Config b s r c f <- getDefaults
+  file <- if f == "-" then getContents else readFile f
+  let (freqs :: Counts Sc.Scientific, errors) = readFreqs . lines $ file
+  TLIO.putStr . sh r c s $ toBuckets b $ freqs
+  let realErrors = filter (not . all (== ' ')) errors
+  when (length realErrors > 0) $ putStrLn $ "Couldn't parse these lines: " <> show realErrors
 
 getDefaults :: IO Config
 getDefaults = do
@@ -69,8 +74,12 @@ data Buckets
   | Discrete [(Rational, Integer)]
   deriving Show
 
-readFreqs :: (Read a, Ord a) => [String] -> Counts a
-readFreqs = foldl (\m t -> M.insertWith (+) (read t) 1 m) M.empty
+readFreqs :: (Read a, Ord a) => [String] -> (Counts a, [String])
+readFreqs ts = runWriter $ foldM f M.empty ts
+  where
+    f m t = case readMaybe t of
+      Nothing -> tell [t] *> pure m
+      Just n -> pure $ M.insertWith (+) n 1 m
 
 toBuckets :: (Fractional a, Ord a, Show a, Real a) => Integer -> Counts a -> Buckets
 toBuckets n rm = if toInteger (M.size rm) <= n
