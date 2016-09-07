@@ -28,7 +28,7 @@ data Config = Config
   { buckets :: Integer
   , scale :: Either Integer Integer -- Either force $(tput lines)
   -- labels
-  , showBuckets :: Bool
+  , hideBuckets :: Bool
   , hideCounts :: Bool
   } deriving (Show)
 
@@ -41,7 +41,7 @@ argp def = O.info (O.helper <*> optParser) optProgDesc
     optParser = pure Config
        <*> optAuto 'b' "buckets" "number of buckets" (O.value (buckets def))
        <*> optAuto 's' "scale" "scale counts to some integer" (O.value (scale def))
-       <*> optSw 'r' "show-buckets" "show buckets" mempty
+       <*> optSw 'r' "hide-buckets" "hide buckets" mempty
        <*> optSw 'c' "hide-counts" "hide counts" mempty
 
 main :: IO ()
@@ -54,7 +54,7 @@ getDefaults :: IO Config
 getDefaults = do
   cols <- read' "cols"
   lines <- read' "lines"
-  let def = Config (lines - 1) (Right cols) False True
+  let def = Config (lines - 1) (Right cols) False False "-"
   args <- O.execParser $ argp def
   print args
   return args
@@ -99,7 +99,7 @@ f a b = error "This should never happen"
 -- * Show
 
 sh :: (Real a, RealFrac a) => Bool -> Bool -> Either Integer Integer -> Buckets -> TL.Text
-sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
+sh hideBuckets hideCounts scaleC b = TL.unlines $ case b of
   Interval bm -> let
       (amax, bmax) = intervalLabels bm
       (aformat, amaxPadded) = mkFormat amax
@@ -116,6 +116,8 @@ sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
     in map (row discreteLabel (scale bucketLabelLength)) bm
 
   where
+    showBuckets = not hideBuckets
+    showCounts = not hideCounts
     sep1 = " - "
     sep2 = " "
     sep3 = "  "
@@ -129,7 +131,7 @@ sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
     row :: forall b. (b -> W ()) -> (Integer -> Integer) -> (b, Integer) -> TL.Text
     row mkLabel scale (bucket, c) = execWriter $ do
       mkLabel bucket
-      when (not hideCounts) $ tell (countNum countLength c)
+      when showCounts $ tell (countNum countLength c)
       tell $ countBar scale c
 
     scale :: Integer -> Integer -> Integer
@@ -137,7 +139,7 @@ sh showBuckets hideCounts scaleC b = TL.unlines $ case b of
       Left scaleTo -> let frac = fromInteger scaleTo / fromInteger maxCount
         in \cur -> floor (frac * fromInteger cur)
       Right termWidth -> let
-        deduction = (if showBuckets then bucketLabelLength else 0) + (if not hideCounts then countLabelLength else 0)
+        deduction = (if showBuckets then bucketLabelLength else 0) + (if showCounts then countLabelLength else 0)
         scaleTo = termWidth - deduction
         in if maxCount < scaleTo
           then id
