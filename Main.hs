@@ -3,6 +3,7 @@ module Main where
 import Prelude
 import Data.Monoid
 import Data.String
+import Data.Ratio
 import Text.Read
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
@@ -14,12 +15,16 @@ import qualified Data.Scientific as Sc
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad
-import Control.Arrow (first)
+import Control.Arrow (first, second)
 
 import qualified Options.Applicative as O
 import System.Process (readProcess)
 
 import qualified Data.Text.Format as F
+import GHC.Real (Ratio(..))
+
+import Distribution
+import ArbitraryRatio
 
 -- * Command line arguments
 
@@ -50,7 +55,9 @@ main :: IO ()
 main = do
   Config b s r c f <- getDefaults
   file <- if f == "-" then getContents else readFile f
-  let (freqs :: Counts Sc.Scientific, errors) = readFreqs . lines $ file
+  let
+    (freqs :: Counts Sc.Scientific, errors) = readFreqs . lines $ file
+    info = process freqs
   TLIO.putStr . sh r c s $ toBuckets b $ freqs
   let realErrors = filter (not . all (== ' ')) errors
   when (length realErrors > 0) $ putStrLn $ "Couldn't parse these lines: " <> show realErrors
@@ -81,6 +88,25 @@ readFreqs ts = runWriter $ foldM f M.empty ts
       Nothing -> tell [t] *> pure m
       Just n -> pure $ M.insertWith (+) n 1 m
 
+data Info a = Info
+  { counts :: Counts a
+  , sum :: a
+  , average :: Ratio a
+  , quantiles_ :: [ArbitraryRatio a]
+  }
+
+process :: forall a. (Num a) => Counts a -> Info a
+process m = Info m sum' (sum' :% fromIntegral totalCount) q
+  where
+    li =  M.toList m :: [(a, Integer)]
+    sum' = L.sum . map (uncurry (*) . second fromInteger) $ li :: a
+    totalCount = L.sum $ map snd li :: Integer
+
+    orderedValues ((v, n) : rest) = replicate (fromInteger n) v <> orderedValues rest -- :: [a]
+    orderedValues _ = []
+    q = quantiles 4 (orderedValues li)
+
+
 toBuckets :: (Fractional a, Ord a, Show a, Real a) => Integer -> Counts a -> Buckets
 toBuckets n rm = if toInteger (M.size rm) <= n
   then Discrete li
@@ -101,7 +127,7 @@ mkIntervals n li = let
 f :: (Ord a, Num b) => [(a, a)] -> [(a, b)] -> [((a, a), b)]
 f (bu@ (_, b) : xs) li = let
     (cur, rest) = L.partition ((<= b) . fst) li
-  in (bu, sum (map snd cur)) : f xs rest
+  in (bu, L.sum (map snd cur)) : f xs rest
 f [] [] = []
 f a b = error "This should never happen"
 
@@ -181,3 +207,5 @@ maker f short long help more = f
    <> O.long long
    <> O.help help
    <> more
+
+u = undefined
