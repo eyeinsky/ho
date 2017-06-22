@@ -14,9 +14,45 @@ category:            Graphics
 build-type:          Simple
 cabal-version:       >=1.10
 
+library
+  exposed-modules:
+  other-modules:
+      Pr
+  default-extensions:
+      Arrows
+    , BangPatterns
+    , DataKinds
+    , DefaultSignatures
+    , DeriveDataTypeable
+    , DeriveFunctor
+    , DeriveGeneric
+    , EmptyDataDecls
+    , ExtendedDefaultRules
+    , FlexibleContexts
+    , FlexibleInstances
+    , FunctionalDependencies
+    , GADTs
+    , GeneralizedNewtypeDeriving
+    , KindSignatures
+    , MultiParamTypeClasses
+    , NamedFieldPuns
+    , NoImplicitPrelude
+    , NoMonomorphismRestriction
+    , OverloadedStrings
+    , PolyKinds
+    , QuasiQuotes
+    , RecursiveDo
+    , ScopedTypeVariables
+    , StandaloneDeriving
+    , TemplateHaskell
+    , TupleSections
+    , TypeFamilies
+    , TypeOperators
+    , TypeSynonymInstances
+    , InstanceSigs
+
 executable ho
   main-is:             Main.hs
-  -- other-modules:
   default-extensions:  NoImplicitPrelude, TupleSections, TypeSynonymInstances
                      , TypeOperators, ScopedTypeVariables, KindSignatures, Arrows
                      , OverloadedStrings, ExtendedDefaultRules, NoMonomorphismRestriction
